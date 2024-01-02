@@ -14,10 +14,7 @@ void LocalMatcher::SetModelCloud(const PXYZS::Ptr model)
     return;
 }
 
-void LocalMatcher::ExtractISSKeypoints(bool flag, int salient_radius,
-    int nonmax_radius, int min_neighbors,
-    double threshold21, double threshold32,
-    int num_threads)
+void LocalMatcher::ExtractISSKeypoints(bool flag, const IssParameters& iss_param)
 {
     PXYZS::Ptr keypoints(new PXYZS);
     PXYZS::Ptr cloud(new PXYZS);
@@ -36,20 +33,21 @@ void LocalMatcher::ExtractISSKeypoints(bool flag, int salient_radius,
 
     // Set the radius of the spherical neighborhood used to compute the scatter
     // matrix.
-    detector.setSalientRadius(salient_radius * resolution);
+    detector.setSalientRadius(iss_param.salient_radius * resolution);
     // Set the radius for the application of the non maxima supression algorithm.
-    detector.setNonMaxRadius(nonmax_radius * resolution);
+    detector.setNonMaxRadius(iss_param.nonmax_radius * resolution);
     // Set the minimum number of neighbors that has to be found while applying the
     // non maxima suppression algorithm.
-    detector.setMinNeighbors(min_neighbors);
+    detector.setMinNeighbors(iss_param.min_neighbors);
     // Set the upper bound on the ratio between the second and the first
     // eigenvalue.
-    detector.setThreshold21(threshold21);
+    detector.setThreshold21(iss_param.threshold21);
     // Set the upper bound on the ratio between the third and the second
     // eigenvalue.
-    detector.setThreshold32(threshold32);
+    detector.setThreshold32(iss_param.threshold32);
     // Set the number of prpcessing threads to use. 0 sets it to automatic.
-    detector.setNumberOfThreads(num_threads);
+    detector.setNumberOfThreads(iss_param.num_threads);
+
     detector.compute(*keypoints);
 
     // flag==1, scene keypoints
@@ -87,6 +85,718 @@ void LocalMatcher::ExtractDownSamplingKeypoints(bool flag, double radius)
     }
 
     // Show_Keypoints(keypoints, cloud);
+}
+
+void LocalMatcher::PFHMatch(const PfhParameters& pfh_param)
+{
+    pcl::PointCloud<pcl::PFHSignature125>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::PFHSignature125>());
+    pcl::PointCloud<pcl::PFHSignature125>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::PFHSignature125>());
+
+    CalculatePfhDescri(scene_keypoints_, pfh_param.pfh_radius,
+        pfh_param.normal_radius, scene_descriptors);
+    CalculatePfhDescri(model_keypoints_, pfh_param.pfh_radius,
+        pfh_param.normal_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::PFHSignature125> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
+            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+                neighbors, squaredDistances);
+            // std::cout << squaredDistances[0] << std::endl;
+            if (neighborCount == 1 && squaredDistances[0] < pfh_param.distance_thre) {
+                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                    squaredDistances[0]);
+                correspondences->push_back(correspondence);
+            }
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (pfh_param.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::PFHSignature125> pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(pfh_param.common_params.randomness);
+    pose.setInlierFraction(pfh_param.common_params.inlier_fraction);
+    pose.setNumberOfSamples(pfh_param.common_params.num_samples);
+    pose.setSimilarityThreshold(pfh_param.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(pfh_param.common_params.corres_distance);
+    pose.setMaximumIterations(pfh_param.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+    if (pfh_param.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculatePfhDescri(
+    const PXYZS::Ptr cloud,
+    double pfh_radius, double normal_radius,
+    const pcl::PointCloud<pcl::PFHSignature125>::Ptr& descriptors)
+{
+    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>);
+
+    EstimateNormalsByK(cloud, normals, 10);
+    pcl::PFHEstimation<PXYZ, PN, pcl::PFHSignature125> pfh;
+    pfh.setInputCloud(cloud);
+    pfh.setInputNormals(normals);
+    pfh.setSearchMethod(kdtree);
+    pfh.setRadiusSearch(pfh_radius);
+
+    pfh.compute(*descriptors);
+}
+
+void LocalMatcher::FPFHMatch(const FpfhParameters& fpfh_param)
+{
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::FPFHSignature33>());
+    pcl::PointCloud<pcl::FPFHSignature33>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::FPFHSignature33>());
+    CalculateFpfhDescri(scene_keypoints_, fpfh_param.fpfh_radius,
+        fpfh_param.normal_radius, scene_descriptors);
+    CalculateFpfhDescri(model_keypoints_, fpfh_param.fpfh_radius,
+        fpfh_param.normal_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::FPFHSignature33> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
+            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+                neighbors, squaredDistances);
+            // std::cout << squaredDistances[0] << std::endl;
+            if (neighborCount == 1 && squaredDistances[0] < fpfh_param.distance_thre) {
+                // model_index, scene_index, distance
+                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                    squaredDistances[0]);
+                correspondences->push_back(correspondence);
+            }
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (fpfh_param.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::FPFHSignature33> pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(fpfh_param.common_params.randomness);
+    pose.setInlierFraction(fpfh_param.common_params.inlier_fraction);
+    pose.setNumberOfSamples(fpfh_param.common_params.num_samples);
+    pose.setSimilarityThreshold(fpfh_param.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(fpfh_param.common_params.corres_distance);
+    pose.setMaximumIterations(fpfh_param.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+
+    if (fpfh_param.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculateFpfhDescri(
+    const PXYZS::Ptr cloud,
+    double fpfh_radius, double normal_radius,
+    const pcl::PointCloud<pcl::FPFHSignature33>::Ptr& descriptors)
+{
+    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
+
+    // EstimateNormals(cloud, kdtree, normals, normal_radius);
+    EstimateNormalsByK(cloud, normals, 10);
+    pcl::FPFHEstimation<PXYZ, PN, pcl::FPFHSignature33> fpfh;
+    fpfh.setInputCloud(cloud);
+    fpfh.setInputNormals(normals);
+    fpfh.setSearchMethod(kdtree);
+    fpfh.setRadiusSearch(fpfh_radius);
+    fpfh.compute(*descriptors);
+}
+
+void LocalMatcher::RSDMatch(const RsdParameters& rsd_parameters)
+{
+    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::PrincipalRadiiRSD>());
+    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::PrincipalRadiiRSD>());
+
+    CalculateRsdDescri(scene_keypoints_, rsd_parameters.rsd_radius,
+        rsd_parameters.plane_radius, rsd_parameters.normal_radius, scene_descriptors);
+    CalculateRsdDescri(model_keypoints_, rsd_parameters.rsd_radius,
+        rsd_parameters.plane_radius, rsd_parameters.normal_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::PrincipalRadiiRSD> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+            neighbors, squaredDistances);
+        // std::cout << squaredDistances[0] << std::endl;
+        if (neighborCount == 1 && squaredDistances[0] < rsd_parameters.distance_thre) {
+            pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                squaredDistances[0]);
+            correspondences->push_back(correspondence);
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (rsd_parameters.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::PrincipalRadiiRSD> pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(rsd_parameters.common_params.randomness);
+    pose.setInlierFraction(rsd_parameters.common_params.inlier_fraction);
+    pose.setNumberOfSamples(rsd_parameters.common_params.num_samples);
+    pose.setSimilarityThreshold(rsd_parameters.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(rsd_parameters.common_params.corres_distance);
+    pose.setMaximumIterations(rsd_parameters.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+    if (rsd_parameters.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculateRsdDescri(
+    const PXYZS::Ptr cloud,
+    double rsd_radius, double plane_radius, double normal_radius,
+    const pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr& descriptors)
+{
+    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
+
+    // EstimateNormals(cloud, kdtree, normals, normal_radius);
+    EstimateNormalsByK(cloud, normals, 10);
+    pcl::RSDEstimation<PXYZ, PN, pcl::PrincipalRadiiRSD> rsd;
+    rsd.setInputCloud(cloud);
+    rsd.setInputNormals(normals);
+    rsd.setSearchMethod(kdtree);
+    rsd.setRadiusSearch(rsd_radius);
+    rsd.setPlaneRadius(plane_radius);
+    rsd.setSaveHistograms(false);
+
+    rsd.compute(*descriptors);
+}
+
+void LocalMatcher::DSC3Match(const Dsc3Parameters& dsc3_param)
+{
+    pcl::PointCloud<pcl::ShapeContext1980>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::ShapeContext1980>());
+    pcl::PointCloud<pcl::ShapeContext1980>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::ShapeContext1980>());
+
+    CalculateDscDescri(scene_keypoints_, dsc3_param.dsc_radius, dsc3_param.minimal_radius,
+        dsc3_param.point_density_raidus, dsc3_param.normal_radius, scene_descriptors);
+    CalculateDscDescri(model_keypoints_, dsc3_param.dsc_radius, dsc3_param.minimal_radius,
+        dsc3_param.point_density_raidus, dsc3_param.normal_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::ShapeContext1980> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        if (std::isfinite(scene_descriptors->at(i).descriptor[0])) {
+            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+                neighbors, squaredDistances);
+            // std::cout << squaredDistances[0] << std::endl;
+            if (neighborCount == 1 && squaredDistances[0] < dsc3_param.distance_thre) {
+                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                    squaredDistances[0]);
+                correspondences->push_back(correspondence);
+            }
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (dsc3_param.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::ShapeContext1980> pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(dsc3_param.common_params.randomness);
+    pose.setInlierFraction(dsc3_param.common_params.inlier_fraction);
+    pose.setNumberOfSamples(dsc3_param.common_params.num_samples);
+    pose.setSimilarityThreshold(dsc3_param.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(dsc3_param.common_params.corres_distance);
+    pose.setMaximumIterations(dsc3_param.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+    if (dsc3_param.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculateDscDescri(
+    const PXYZS::Ptr cloud,
+    double dsc_radius, double minimal_radius,
+    double point_density_raidus, double normal_radius,
+    const pcl::PointCloud<pcl::ShapeContext1980>::Ptr& descriptors)
+{
+    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
+
+    // EstimateNormals(cloud, kdtree, normals, normal_radius);
+    EstimateNormalsByK(cloud, normals, 10);
+    pcl::ShapeContext3DEstimation<PXYZ, PN, pcl::ShapeContext1980> sc3d;
+    sc3d.setInputCloud(cloud);
+    sc3d.setInputNormals(normals);
+    sc3d.setSearchMethod(kdtree);
+    sc3d.setRadiusSearch(dsc_radius);
+    sc3d.setMinimalRadius(minimal_radius);
+    sc3d.setPointDensityRadius(point_density_raidus);
+
+    sc3d.compute(*descriptors);
+}
+
+void LocalMatcher::USCMatch(const UscParameters& usc_param)
+{
+    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::UniqueShapeContext1960>());
+    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::UniqueShapeContext1960>());
+
+    CalculateUscDescri(scene_keypoints_, usc_param.usc_radius, usc_param.minimal_radius,
+        usc_param.point_density_raidus, usc_param.local_radius, scene_descriptors);
+    CalculateUscDescri(model_keypoints_, usc_param.usc_radius, usc_param.minimal_radius,
+        usc_param.point_density_raidus, usc_param.local_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::UniqueShapeContext1960> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        if (std::isfinite(scene_descriptors->at(i).descriptor[0])) {
+            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+                neighbors, squaredDistances);
+            // std::cout << squaredDistances[0] << std::endl;
+            if (neighborCount == 1 && squaredDistances[0] < usc_param.distance_thre) {
+                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                    squaredDistances[0]);
+                correspondences->push_back(correspondence);
+            }
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (usc_param.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::UniqueShapeContext1960>
+        pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(usc_param.common_params.randomness);
+    pose.setInlierFraction(usc_param.common_params.inlier_fraction);
+    pose.setNumberOfSamples(usc_param.common_params.num_samples);
+    pose.setSimilarityThreshold(usc_param.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(usc_param.common_params.corres_distance);
+    pose.setMaximumIterations(usc_param.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+    if (usc_param.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculateUscDescri(
+    const PXYZS::Ptr cloud,
+    double usc_radius, double minimal_radius,
+    double point_density_raidus, double local_radius,
+    const pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr& descriptors)
+{
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
+
+    pcl::UniqueShapeContext<PXYZ, pcl::UniqueShapeContext1960, pcl::ReferenceFrame> usc;
+    usc.setInputCloud(cloud);
+    usc.setRadiusSearch(usc_radius);
+    usc.setMinimalRadius(minimal_radius);
+    usc.setPointDensityRadius(point_density_raidus);
+    usc.setLocalRadius(local_radius);
+
+    usc.compute(*descriptors);
+}
+
+void LocalMatcher::SHOTMatch(const ShotParameters& shot_param)
+{
+    pcl::PointCloud<pcl::SHOT352>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::SHOT352>());
+    pcl::PointCloud<pcl::SHOT352>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::SHOT352>());
+
+    CalculateShotDescri(scene_keypoints_, shot_param.shot_radius,
+        shot_param.normal_radius, scene_descriptors);
+    CalculateShotDescri(model_keypoints_, shot_param.shot_radius,
+        shot_param.normal_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::SHOT352> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        if (std::isfinite(scene_descriptors->at(i).descriptor[0])) {
+            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+                neighbors, squaredDistances);
+            // std::cout << squaredDistances[0] << std::endl;
+            if (neighborCount == 1 && squaredDistances[0] < shot_param.distance_thre) {
+                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                    squaredDistances[0]);
+                correspondences->push_back(correspondence);
+            }
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (shot_param.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::SHOT352> pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(shot_param.common_params.randomness);
+    pose.setInlierFraction(shot_param.common_params.inlier_fraction);
+    pose.setNumberOfSamples(shot_param.common_params.num_samples);
+    pose.setSimilarityThreshold(shot_param.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(shot_param.common_params.corres_distance);
+    pose.setMaximumIterations(shot_param.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+    if (shot_param.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculateShotDescri(
+    const PXYZS::Ptr cloud,
+    double shot_radius, double normal_radius,
+    const pcl::PointCloud<pcl::SHOT352>::Ptr& descriptors)
+{
+    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
+
+    EstimateNormalsByK(cloud, normals, 10);
+    // EstimateNormals(cloud, kdtree, normals, normal_radius);
+
+    pcl::SHOTEstimation<PXYZ, PN, pcl::SHOT352> shot;
+    shot.setInputCloud(cloud);
+    shot.setInputNormals(normals);
+    shot.setRadiusSearch(shot_radius);
+
+    shot.compute(*descriptors);
+}
+
+void LocalMatcher::SIMatch(const SpinParameters& spin_param)
+{
+    pcl::PointCloud<pcl::Histogram<153>>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::Histogram<153>>());
+    pcl::PointCloud<pcl::Histogram<153>>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::Histogram<153>>());
+
+    CalculateSiDescri(scene_keypoints_, spin_param.si_radius, spin_param.image_width,
+        spin_param.normal_radius, scene_descriptors);
+    CalculateSiDescri(model_keypoints_, spin_param.si_radius, spin_param.image_width,
+        spin_param.normal_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::Histogram<153>> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
+            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+                neighbors, squaredDistances);
+            // std::cout << squaredDistances[0] << std::endl;
+            if (neighborCount == 1 && squaredDistances[0] < spin_param.distance_thre) {
+                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                    squaredDistances[0]);
+                correspondences->push_back(correspondence);
+            }
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (spin_param.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::Histogram<153>> pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(spin_param.common_params.randomness);
+    pose.setInlierFraction(spin_param.common_params.inlier_fraction);
+    pose.setNumberOfSamples(spin_param.common_params.num_samples);
+    pose.setSimilarityThreshold(spin_param.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(spin_param.common_params.corres_distance);
+    pose.setMaximumIterations(spin_param.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+    if (spin_param.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculateSiDescri(
+    const PXYZS::Ptr cloud,
+    double si_radius, int image_width,
+    double normal_radius,
+    const pcl::PointCloud<pcl::Histogram<153>>::Ptr& descriptors)
+{
+    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
+
+    // EstimateNormals(cloud, kdtree, normals, normal_radius);
+    EstimateNormalsByK(cloud, normals, 10);
+
+    pcl::SpinImageEstimation<PXYZ, PN, pcl::Histogram<153>> si;
+    si.setInputCloud(cloud);
+    si.setInputNormals(normals);
+    si.setRadiusSearch(si_radius);
+    si.setImageWidth(image_width);
+
+    si.compute(*descriptors);
+}
+
+void LocalMatcher::ROPSMatch(const RopsParameters& rops_param)
+{
+    pcl::PointCloud<pcl::Histogram<135>>::Ptr scene_descriptors(
+        new pcl::PointCloud<pcl::Histogram<135>>());
+    pcl::PointCloud<pcl::Histogram<135>>::Ptr model_descriptors(
+        new pcl::PointCloud<pcl::Histogram<135>>());
+
+    CalculateRopsDescri(scene_keypoints_, rops_param.rops_radius,
+        rops_param.num_partions_bins, rops_param.num_rotations, rops_param.support_radius,
+        rops_param.normal_radius, scene_descriptors);
+    CalculateRopsDescri(model_keypoints_, rops_param.rops_radius,
+        rops_param.num_partions_bins, rops_param.num_rotations, rops_param.support_radius,
+        rops_param.normal_radius, model_descriptors);
+
+    pcl::KdTreeFLANN<pcl::Histogram<135>> matching;
+    matching.setInputCloud(model_descriptors);
+
+    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
+
+    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
+        std::vector<int> neighbors(1);
+        std::vector<float> squaredDistances(1);
+
+        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
+            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
+                neighbors, squaredDistances);
+            // std::cout << squaredDistances[0] << std::endl;
+            if (neighborCount == 1 && squaredDistances[0] < rops_param.distance_thre) {
+                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
+                    squaredDistances[0]);
+                correspondences->push_back(correspondence);
+            }
+        }
+    }
+    correspondences_ = correspondences;
+    std::cout << "Found " << correspondences->size() << " correspondences."
+              << std::endl;
+    if (rops_param.common_params.show_flag) {
+        VisualizeCorrs();
+    }
+
+    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::Histogram<135>> pose;
+    PXYZS::Ptr alignedModel(new PXYZS);
+
+    pose.setInputSource(model_keypoints_);
+    pose.setInputTarget(scene_keypoints_);
+    pose.setSourceFeatures(model_descriptors);
+    pose.setTargetFeatures(scene_descriptors);
+
+    pose.setCorrespondenceRandomness(rops_param.common_params.randomness);
+    pose.setInlierFraction(rops_param.common_params.inlier_fraction);
+    pose.setNumberOfSamples(rops_param.common_params.num_samples);
+    pose.setSimilarityThreshold(rops_param.common_params.similiar_thre);
+    pose.setMaxCorrespondenceDistance(rops_param.common_params.corres_distance);
+    pose.setMaximumIterations(rops_param.common_params.nr_iterations);
+
+    pose.align(*alignedModel);
+    if (pose.hasConverged()) {
+        transformations_ = pose.getFinalTransformation();
+        print();
+    } else {
+        std::cout << "Did not converge." << std::endl;
+    }
+    if (rops_param.common_params.show_flag) {
+        Visualize(scene_cloud_, alignedModel, "aligned model");
+    }
+}
+
+void LocalMatcher::CalculateRopsDescri(
+    const PXYZS::Ptr cloud, double rops_radius,
+    int num_partions_bins, int num_rotations,
+    double support_radius, double normal_radius,
+    const pcl::PointCloud<pcl::Histogram<135>>::Ptr& descriptors)
+{
+    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
+    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
+    pcl::PointCloud<pcl::PointNormal>::Ptr cloudNormals(
+        new pcl::PointCloud<pcl::PointNormal>);
+
+    EstimateNormalsByK(cloud, normals, 10);
+
+    // perform triangulation
+    pcl::concatenateFields(*cloud, *normals, *cloudNormals);
+    pcl::search::KdTree<pcl::PointNormal>::Ptr kdtree2(
+        new pcl::search::KdTree<pcl::PointNormal>);
+    kdtree2->setInputCloud(cloudNormals);
+
+    pcl::GreedyProjectionTriangulation<pcl::PointNormal> triangulation;
+    pcl::PolygonMesh triangles;
+    triangulation.setSearchRadius(0.1);
+    triangulation.setMu(2.5);
+    triangulation.setMaximumNearestNeighbors(10);
+    triangulation.setMaximumSurfaceAngle(M_PI / 4);
+    triangulation.setNormalConsistency(false);
+    triangulation.setMinimumAngle(M_PI / 18);
+    triangulation.setMaximumAngle(2 * M_PI / 3);
+    triangulation.setInputCloud(cloudNormals);
+    triangulation.setSearchMethod(kdtree2);
+    triangulation.reconstruct(triangles);
+
+    // rops estimation object
+    pcl::ROPSEstimation<PXYZ, pcl::Histogram<135>> rops;
+    rops.setInputCloud(cloud);
+    rops.setSearchMethod(kdtree);
+    rops.setRadiusSearch(rops_radius);
+    rops.setTriangles(triangles.polygons);
+    rops.setNumberOfPartitionBins(num_partions_bins);
+    rops.setNumberOfRotations(num_rotations);
+    rops.setSupportRadius(support_radius);
+
+    rops.compute(*descriptors);
 }
 
 void LocalMatcher::AccuracyEstimate()
@@ -152,829 +862,6 @@ void LocalMatcher::CorresGrouping(double gc_size)
     }
 }
 
-void LocalMatcher::PFHMatch(double pfh_radius, double normal_radius,
-    double distance_thre, int randomness,
-    double inlier_fraction, int num_samples,
-    double similiar_thre, double corres_distance,
-    int nr_iterations)
-{
-    pcl::PointCloud<pcl::PFHSignature125>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::PFHSignature125>());
-    pcl::PointCloud<pcl::PFHSignature125>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::PFHSignature125>());
-
-    CalculatePfhDescri(scene_keypoints_, scene_descriptors, pfh_radius,
-        normal_radius);
-    CalculatePfhDescri(model_keypoints_, model_descriptors, pfh_radius,
-        normal_radius);
-
-    pcl::KdTreeFLANN<pcl::PFHSignature125> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
-            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-                neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
-            if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                    squaredDistances[0]);
-                correspondences->push_back(correspondence);
-            }
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    // VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::PFHSignature125> pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    // Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculatePfhDescri(
-    const PXYZS::Ptr cloud,
-    pcl::PointCloud<pcl::PFHSignature125>::Ptr descriptors, double pfh_radius,
-    double normal_radius)
-{
-    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>);
-
-    EstimateNormalsByK(cloud, normals, 10);
-    pcl::PFHEstimation<PXYZ, PN, pcl::PFHSignature125> pfh;
-    pfh.setInputCloud(cloud);
-    pfh.setInputNormals(normals);
-    pfh.setSearchMethod(kdtree);
-    pfh.setRadiusSearch(pfh_radius);
-
-    pfh.compute(*descriptors);
-}
-
-void LocalMatcher::ROPSMatch(double rops_radius, int num_partions_bins,
-    int num_rotations, double support_radius,
-    double normal_radius, double distance_thre,
-    int randomness, double inlier_fraction,
-    int num_samples, double similiar_thre,
-    double corres_distance, int nr_iterations)
-{
-    pcl::PointCloud<pcl::Histogram<135>>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::Histogram<135>>());
-    pcl::PointCloud<pcl::Histogram<135>>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::Histogram<135>>());
-
-    CalculateRopsDescri(scene_keypoints_, scene_descriptors, rops_radius,
-        num_partions_bins, num_rotations, support_radius,
-        normal_radius);
-    CalculateRopsDescri(model_keypoints_, model_descriptors, rops_radius,
-        num_partions_bins, num_rotations, support_radius,
-        normal_radius);
-
-    pcl::KdTreeFLANN<pcl::Histogram<135>> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
-            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-                neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
-            if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                    squaredDistances[0]);
-                correspondences->push_back(correspondence);
-            }
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::Histogram<135>> pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculateRopsDescri(
-    const PXYZS::Ptr cloud,
-    pcl::PointCloud<pcl::Histogram<135>>::Ptr descriptors, double rops_radius,
-    int num_partions_bins, int num_rotations, double support_radius,
-    double normal_radius)
-{
-    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
-    pcl::PointCloud<pcl::PointNormal>::Ptr cloudNormals(
-        new pcl::PointCloud<pcl::PointNormal>);
-
-    EstimateNormalsByK(cloud, normals, 10);
-    // perform triangulation
-    pcl::concatenateFields(*cloud, *normals, *cloudNormals);
-    pcl::search::KdTree<pcl::PointNormal>::Ptr kdtree2(
-        new pcl::search::KdTree<pcl::PointNormal>);
-    kdtree2->setInputCloud(cloudNormals);
-
-    pcl::GreedyProjectionTriangulation<pcl::PointNormal> triangulation;
-    pcl::PolygonMesh triangles;
-    triangulation.setSearchRadius(0.1);
-    triangulation.setMu(2.5);
-    triangulation.setMaximumNearestNeighbors(10);
-    triangulation.setMaximumSurfaceAngle(M_PI / 4);
-    triangulation.setNormalConsistency(false);
-    triangulation.setMinimumAngle(M_PI / 18);
-    triangulation.setMaximumAngle(2 * M_PI / 3);
-    triangulation.setInputCloud(cloudNormals);
-    triangulation.setSearchMethod(kdtree2);
-    triangulation.reconstruct(triangles);
-
-    // rops estimation object
-    pcl::ROPSEstimation<PXYZ, pcl::Histogram<135>> rops;
-    rops.setInputCloud(cloud);
-    rops.setSearchMethod(kdtree);
-    rops.setRadiusSearch(rops_radius);
-    rops.setTriangles(triangles.polygons);
-    rops.setNumberOfPartitionBins(num_partions_bins);
-    rops.setNumberOfRotations(num_rotations);
-    rops.setSupportRadius(support_radius);
-
-    rops.compute(*descriptors);
-}
-
-void LocalMatcher::SIMatch(double si_radius, int image_width,
-    double normal_radius, double distance_thre,
-    int randomness, double inlier_fraction,
-    int num_samples, double similiar_thre,
-    double corres_distance, int nr_iterations)
-{
-    pcl::PointCloud<pcl::Histogram<153>>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::Histogram<153>>());
-    pcl::PointCloud<pcl::Histogram<153>>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::Histogram<153>>());
-
-    CalculateSiDescri(scene_keypoints_, scene_descriptors, si_radius, image_width,
-        normal_radius);
-    CalculateSiDescri(model_keypoints_, model_descriptors, si_radius, image_width,
-        normal_radius);
-
-    pcl::KdTreeFLANN<pcl::Histogram<153>> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
-            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-                neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
-            if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                    squaredDistances[0]);
-                correspondences->push_back(correspondence);
-            }
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::Histogram<153>> pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculateSiDescri(
-    const PXYZS::Ptr cloud,
-    pcl::PointCloud<pcl::Histogram<153>>::Ptr descriptors, double si_radius,
-    int image_width, double normal_radius)
-{
-    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
-
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
-    EstimateNormalsByK(cloud, normals, 10);
-
-    pcl::SpinImageEstimation<PXYZ, PN, pcl::Histogram<153>> si;
-    si.setInputCloud(cloud);
-    si.setInputNormals(normals);
-    si.setRadiusSearch(si_radius);
-    si.setImageWidth(image_width);
-
-    si.compute(*descriptors);
-}
-
-void LocalMatcher::SHOTMatch(double shot_radius, double normal_radius,
-    double distance_thre, int randomness,
-    double inlier_fraction, int num_samples,
-    double similiar_thre, double corres_distance,
-    int nr_iterations)
-{
-    pcl::PointCloud<pcl::SHOT352>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::SHOT352>());
-    pcl::PointCloud<pcl::SHOT352>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::SHOT352>());
-
-    CalculateShotDescri(scene_keypoints_, scene_descriptors, shot_radius,
-        normal_radius);
-    CalculateShotDescri(model_keypoints_, model_descriptors, shot_radius,
-        normal_radius);
-
-    pcl::KdTreeFLANN<pcl::SHOT352> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        if (std::isfinite(scene_descriptors->at(i).descriptor[0])) {
-            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-                neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
-            if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                    squaredDistances[0]);
-                correspondences->push_back(correspondence);
-            }
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::SHOT352> pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculateShotDescri(
-    const PXYZS::Ptr cloud, pcl::PointCloud<pcl::SHOT352>::Ptr descriptors,
-    double shot_radius, double normal_radius)
-{
-    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
-
-    EstimateNormalsByK(cloud, normals, 10);
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
-
-    pcl::SHOTEstimation<PXYZ, PN, pcl::SHOT352> shot;
-    shot.setInputCloud(cloud);
-    shot.setInputNormals(normals);
-    shot.setRadiusSearch(shot_radius);
-
-    shot.compute(*descriptors);
-}
-
-void LocalMatcher::USCMatch(double usc_radius, double minimal_radius,
-    double point_density_raidus, double local_radius,
-    double distance_thre, int randomness,
-    double inlier_fraction, int num_samples,
-    double similiar_thre, double corres_distance,
-    int nr_iterations)
-{
-    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::UniqueShapeContext1960>());
-    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::UniqueShapeContext1960>());
-
-    CalculateUscDescri(scene_keypoints_, scene_descriptors, usc_radius,
-        minimal_radius, point_density_raidus, local_radius);
-    CalculateUscDescri(model_keypoints_, model_descriptors, usc_radius,
-        minimal_radius, point_density_raidus, local_radius);
-
-    pcl::KdTreeFLANN<pcl::UniqueShapeContext1960> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        if (std::isfinite(scene_descriptors->at(i).descriptor[0])) {
-            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-                neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
-            if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                    squaredDistances[0]);
-                correspondences->push_back(correspondence);
-            }
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::UniqueShapeContext1960>
-        pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculateUscDescri(
-    const PXYZS::Ptr cloud,
-    pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr descriptors,
-    double usc_radius, double minimal_radius, double point_density_raidus,
-    double local_radius)
-{
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
-
-    pcl::UniqueShapeContext<PXYZ, pcl::UniqueShapeContext1960,
-        pcl::ReferenceFrame>
-        usc;
-    usc.setInputCloud(cloud);
-    usc.setRadiusSearch(usc_radius);
-    usc.setMinimalRadius(minimal_radius);
-    usc.setPointDensityRadius(point_density_raidus);
-    usc.setLocalRadius(local_radius);
-
-    usc.compute(*descriptors);
-}
-
-void LocalMatcher::DSC3Match(double dsc_radius, double minimal_radius,
-    double point_density_raidus, double normal_radius,
-    double distance_thre, int randomness,
-    double inlier_fraction, int num_samples,
-    double similiar_thre, double corres_distance,
-    int nr_iterations)
-{
-    pcl::PointCloud<pcl::ShapeContext1980>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::ShapeContext1980>());
-    pcl::PointCloud<pcl::ShapeContext1980>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::ShapeContext1980>());
-
-    CalculateDscDescri(scene_keypoints_, scene_descriptors, dsc_radius,
-        minimal_radius, point_density_raidus, normal_radius);
-    CalculateDscDescri(model_keypoints_, model_descriptors, dsc_radius,
-        minimal_radius, point_density_raidus, normal_radius);
-
-    pcl::KdTreeFLANN<pcl::ShapeContext1980> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        if (std::isfinite(scene_descriptors->at(i).descriptor[0])) {
-            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-                neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
-            if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                    squaredDistances[0]);
-                correspondences->push_back(correspondence);
-            }
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::ShapeContext1980> pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculateDscDescri(
-    const PXYZS::Ptr cloud,
-    pcl::PointCloud<pcl::ShapeContext1980>::Ptr descriptors, double dsc_radius,
-    double minimal_radius, double point_density_raidus, double normal_radius)
-{
-    pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
-
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
-    EstimateNormalsByK(cloud, normals, 10);
-    pcl::ShapeContext3DEstimation<PXYZ, PN, pcl::ShapeContext1980> sc3d;
-    sc3d.setInputCloud(cloud);
-    sc3d.setInputNormals(normals);
-    sc3d.setSearchMethod(kdtree);
-    sc3d.setRadiusSearch(dsc_radius);
-    sc3d.setMinimalRadius(minimal_radius);
-    sc3d.setPointDensityRadius(point_density_raidus);
-
-    sc3d.compute(*descriptors);
-}
-
-void LocalMatcher::RSDMatch(double rsd_radius, double plane_radius,
-    double normal_radius, double distance_thre,
-    int randomness, double inlier_fraction,
-    int num_samples, double similiar_thre,
-    double corres_distance, int nr_iterations)
-{
-    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::PrincipalRadiiRSD>());
-    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::PrincipalRadiiRSD>());
-
-    CalculateRsdDescri(scene_keypoints_, scene_descriptors, rsd_radius,
-        plane_radius, normal_radius);
-    CalculateRsdDescri(model_keypoints_, model_descriptors, rsd_radius,
-        plane_radius, normal_radius);
-
-    pcl::KdTreeFLANN<pcl::PrincipalRadiiRSD> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-            neighbors, squaredDistances);
-        // std::cout << squaredDistances[0] << std::endl;
-        if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-            pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                squaredDistances[0]);
-            correspondences->push_back(correspondence);
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::PrincipalRadiiRSD> pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculateRsdDescri(
-    const PXYZS::Ptr cloud,
-    pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr descriptors, double rsd_radius,
-    double plane_radius, double normal_radius)
-{
-    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
-
-    EstimateNormals(cloud, kdtree, normals, normal_radius);
-    pcl::RSDEstimation<PXYZ, PN, pcl::PrincipalRadiiRSD> rsd;
-    rsd.setInputCloud(cloud);
-    rsd.setInputNormals(normals);
-    rsd.setSearchMethod(kdtree);
-    rsd.setRadiusSearch(rsd_radius);
-    rsd.setPlaneRadius(plane_radius);
-    rsd.setSaveHistograms(false);
-
-    rsd.compute(*descriptors);
-}
-
-void LocalMatcher::FPFHMatch(double fpfh_radius, double normal_radius,
-    double distance_thre, int randomness,
-    double inlier_fraction, int num_samples,
-    double similiar_thre, double corres_distance,
-    int nr_iterations)
-{
-    pcl::PointCloud<pcl::FPFHSignature33>::Ptr scene_descriptors(
-        new pcl::PointCloud<pcl::FPFHSignature33>());
-    pcl::PointCloud<pcl::FPFHSignature33>::Ptr model_descriptors(
-        new pcl::PointCloud<pcl::FPFHSignature33>());
-    CalculateFpfhDescri(scene_keypoints_, scene_descriptors, fpfh_radius,
-        normal_radius);
-    CalculateFpfhDescri(model_keypoints_, model_descriptors, fpfh_radius,
-        normal_radius);
-
-    pcl::KdTreeFLANN<pcl::FPFHSignature33> matching;
-    matching.setInputCloud(model_descriptors);
-
-    pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
-
-    for (size_t i = 0; i < scene_descriptors->size(); ++i) {
-        std::vector<int> neighbors(1);
-        std::vector<float> squaredDistances(1);
-
-        if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
-            int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
-                neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
-            if (neighborCount == 1 && squaredDistances[0] < distance_thre) {
-                // model_index, scene_index, distance
-                pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
-                    squaredDistances[0]);
-                correspondences->push_back(correspondence);
-            }
-        }
-    }
-    correspondences_ = correspondences;
-    std::cout << "Found " << correspondences->size() << " correspondences."
-              << std::endl;
-    // VisualizeCorrs();
-
-    pcl::SampleConsensusPrerejective<PXYZ, PXYZ, pcl::FPFHSignature33> pose;
-    PXYZS::Ptr alignedModel(new PXYZS);
-
-    pose.setInputSource(model_keypoints_);
-    pose.setInputTarget(scene_keypoints_);
-    pose.setSourceFeatures(model_descriptors);
-    pose.setTargetFeatures(scene_descriptors);
-
-    pose.setCorrespondenceRandomness(randomness);
-    pose.setInlierFraction(inlier_fraction);
-    pose.setNumberOfSamples(num_samples);
-    pose.setSimilarityThreshold(similiar_thre);
-    pose.setMaxCorrespondenceDistance(corres_distance);
-    pose.setMaximumIterations(nr_iterations);
-
-    pose.align(*alignedModel);
-    if (pose.hasConverged()) {
-        transformations_ = pose.getFinalTransformation();
-        Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
-        Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
-
-        std::cout << "Transformation matrix:" << std::endl
-                  << std::endl;
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
-            rotation(0, 2));
-        printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
-            rotation(1, 2));
-        printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
-            rotation(2, 2));
-        std::cout << std::endl;
-        printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
-            translation(2));
-    } else {
-        std::cout << "Did not converge." << std::endl;
-    }
-
-    // Visualize(scene_cloud_, alignedModel, "aligned model");
-}
-
-void LocalMatcher::CalculateFpfhDescri(
-    const PXYZS::Ptr cloud,
-    pcl::PointCloud<pcl::FPFHSignature33>::Ptr descriptors, double fpfh_radius,
-    double normal_radius)
-{
-    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
-
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
-    EstimateNormalsByK(cloud, normals, 10);
-    pcl::FPFHEstimation<PXYZ, PN, pcl::FPFHSignature33> fpfh;
-    fpfh.setInputCloud(cloud);
-    fpfh.setInputNormals(normals);
-    fpfh.setSearchMethod(kdtree);
-    fpfh.setRadiusSearch(fpfh_radius);
-    fpfh.compute(*descriptors);
-}
-
 void LocalMatcher::EstimateNormals(const PXYZS::Ptr cloud,
     pcl::search::KdTree<PXYZ>::Ptr kdtree,
     const PNS::Ptr normals, double radius)
@@ -1026,6 +913,24 @@ double LocalMatcher::ComputeCloudResolution(const PXYZS::ConstPtr& cloud)
         resolution /= numberOfPoints;
 
     return resolution;
+}
+
+void LocalMatcher::print()
+{
+    Eigen::Matrix3f rotation = transformations_.block<3, 3>(0, 0);
+    Eigen::Vector3f translation = transformations_.block<3, 1>(0, 3);
+
+    std::cout << "Transformation matrix:" << std::endl
+              << std::endl;
+    printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(0, 0), rotation(0, 1),
+        rotation(0, 2));
+    printf("\t\tR = | %6.3f %6.3f %6.3f | \n", rotation(1, 0), rotation(1, 1),
+        rotation(1, 2));
+    printf("\t\t    | %6.3f %6.3f %6.3f | \n", rotation(2, 0), rotation(2, 1),
+        rotation(2, 2));
+    std::cout << std::endl;
+    printf("\t\tt = < %0.3f, %0.3f, %0.3f >\n", translation(0), translation(1),
+        translation(2));
 }
 
 void LocalMatcher::ShowKeypoints(PXYZS::Ptr keypoints, PXYZS::Ptr cloud)

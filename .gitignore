@@ -39,3 +39,6 @@ build/
 
 # cache dir
 .cache/
+
+# specific file
+pcl_descriptors.md

@@ -18,28 +18,39 @@ int main() {
   localMatch.SetModelCloud(model);
 
   // 2. extract keypoints
-  // localMatch.ExtractISSKeypoints(0);
-  // localMatch.ExtractISSKeypoints(1);
+  // IssParameters iss_param;
+  // localMatch.ExtractISSKeypoints(0, iss_param);
+  // localMatch.ExtractISSKeypoints(1, iss_param);
   localMatch.ExtractDownSamplingKeypoints(1, 0.01);
   localMatch.ExtractDownSamplingKeypoints(0, 0.01);
 
   // 3. match
   auto start_time = std::chrono::high_resolution_clock::now();
-  // localMatch.PFHMatch();  // OK
 
-  localMatch.FPFHMatch();
+  // PfhParameters pfh_param;
+  // localMatch.PFHMatch(pfh_param);  // OK
 
-  // localMatch.RSDMatch(); // OK
+  // FpfhParameters fpfh_param;
+  // localMatch.FPFHMatch(fpfh_param);
 
-  // localMatch.DSC3Match();
+  // RsdParameters rsd_param;
+  // localMatch.RSDMatch(rsd_param); // OK
 
-  // localMatch.USCMatch(); // OK
+  // Dsc3Parameters dsc3_param;
+  // localMatch.DSC3Match(dsc3_param);
 
-  // localMatch.SHOTMatch(); // OK
+  // UscParameters usc_param;
+  // localMatch.USCMatch(usc_param); // OK
 
-  // localMatch.SIMatch(); // OK
+  // ShotParameters shot_param;
+  // localMatch.SHOTMatch(shot_param); // OK
 
-  // localMatch.ROPSMatch();  // OK
+  // SpinParameters spin_param;
+  // localMatch.SIMatch(spin_param); // OK
+
+  RopsParameters rops_param;
+  localMatch.ROPSMatch(rops_param);  // OK
+
   auto end_time = std::chrono::high_resolution_clock::now();
 
   // 4. correspondences grouping
