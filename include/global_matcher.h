@@ -1,13 +1,13 @@
- ///
- ///@file global_matcher.h
- ///@author liheng (xlh18801265253@sina.com)
- ///@brief Global Recognizing Descriptors of Point Cloud
- ///@version 0.1
- ///@date 2024-01-02
- ///
- ///@copyright Copyright (c) 2024
- ///
- ///
+///
+///@file global_matcher.h
+///@author liheng (xlh18801265253@sina.com)
+///@brief Global Recognizing Descriptors of Point Cloud
+///@version 0.1
+///@date 2024-01-02
+///
+///@copyright Copyright (c) 2024
+///
+///
 #ifndef GLOBAL_MATCHER_H
 #define GLOBAL_MATCHER_H
 
@@ -55,10 +55,15 @@ public:
 
     void SetSceneCloud(const PXYZS::Ptr model);
 
-    void ClusterModelPointCloud(const PXYZS::Ptr cloud,
-        const ClusterParameters& cluster_param);
-
-    void ClusterScenePointCloud(const PXYZS::Ptr cloud,
+    ///
+    ///@brief
+    ///
+    ///@param flag: Choose whether the model pointcloud or scene pointcloud
+    /// scene pointcloud, flag = true / model pointcloud, flag = false
+    ///@param cloud: the cloud need to cluster
+    ///@param cluster_param: the parameters for cluster
+    ///
+    void ClusterPointCloud(const bool flag, const PXYZS::Ptr cloud,
         const ClusterParameters& cluster_param);
 
     void VFHMatch(const VfhParameters& vfh_params);

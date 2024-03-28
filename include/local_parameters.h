@@ -25,14 +25,12 @@ struct IssParameters {
 // distance_thre: 搜索correpondence阈值，不同描述符的阈值不一样
 struct PfhParameters {
     double pfh_radius = 0.025;
-    double normal_radius = 0.02;
     double distance_thre = 600;
     CommonParameters common_params;
 };
 
 struct FpfhParameters {
     double fpfh_radius = 0.01;
-    double normal_radius = 0.01;
     double distance_thre = 2000;
     CommonParameters common_params;
 };
@@ -40,7 +38,6 @@ struct FpfhParameters {
 struct RsdParameters {
     double rsd_radius = 0.02;
     double plane_radius = 0.05;
-    double normal_radius = 0.02;
     double distance_thre = 1e-6;
     CommonParameters common_params;
 };

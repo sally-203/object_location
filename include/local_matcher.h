@@ -95,23 +95,23 @@ private:
 
     void CalculatePfhDescri(
         const PXYZS::Ptr cloud,
-        double pfh_radius, double normal_radius,
+        double pfh_radius,
         const pcl::PointCloud<pcl::PFHSignature125>::Ptr& descriptors);
 
     void CalculateFpfhDescri(
         const PXYZS::Ptr cloud,
-        double fpfh_radius, double normal_radius,
+        double fpfh_radius,
         const pcl::PointCloud<pcl::FPFHSignature33>::Ptr& descriptors);
 
     void CalculateRsdDescri(
         const PXYZS::Ptr cloud,
-        double rsd_radius, double plane_radius, double normal_radius,
+        double rsd_radius, double plane_radius,
         const pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr& descriptors);
 
     void CalculateDscDescri(
         const PXYZS::Ptr cloud,
         double dsc_radius, double minimal_radius,
-        double point_density_raidus, double normal_radius,
+        double point_density_raidus,
         const pcl::PointCloud<pcl::ShapeContext1980>::Ptr& descriptors);
 
     void CalculateUscDescri(
@@ -121,7 +121,7 @@ private:
         const pcl::PointCloud<pcl::UniqueShapeContext1960>::Ptr& descriptors);
 
     void CalculateShotDescri(const PXYZS::Ptr cloud,
-        double shot_radius, double normal_radius,
+        double shot_radius,
         const pcl::PointCloud<pcl::SHOT352>::Ptr& descriptors);
 
     void CalculateSiDescri(const PXYZS::Ptr cloud,

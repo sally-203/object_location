@@ -31,19 +31,15 @@ void LocalMatcher::ExtractISSKeypoints(bool flag, const IssParameters& iss_param
     detector.setSearchMethod(KdTree);
     double resolution = ComputeCloudResolution(cloud);
 
-    // Set the radius of the spherical neighborhood used to compute the scatter
-    // matrix.
+    // Set the radius of the spherical neighborhood used to compute the scatter matrix.
     detector.setSalientRadius(iss_param.salient_radius * resolution);
     // Set the radius for the application of the non maxima supression algorithm.
     detector.setNonMaxRadius(iss_param.nonmax_radius * resolution);
-    // Set the minimum number of neighbors that has to be found while applying the
-    // non maxima suppression algorithm.
+    // Set the minimum number of neighbors that has to be found while applying the non maxima suppression algorithm.
     detector.setMinNeighbors(iss_param.min_neighbors);
-    // Set the upper bound on the ratio between the second and the first
-    // eigenvalue.
+    // Set the upper bound on the ratio between the second and the first eigenvalue.
     detector.setThreshold21(iss_param.threshold21);
-    // Set the upper bound on the ratio between the third and the second
-    // eigenvalue.
+    // Set the upper bound on the ratio between the third and the second eigenvalue.
     detector.setThreshold32(iss_param.threshold32);
     // Set the number of prpcessing threads to use. 0 sets it to automatic.
     detector.setNumberOfThreads(iss_param.num_threads);
@@ -80,8 +76,10 @@ void LocalMatcher::ExtractDownSamplingKeypoints(bool flag, double radius)
 
     if (flag) {
         scene_keypoints_ = keypoints;
+        std::cout << "Scene Keypoints Size: " << scene_keypoints_->size() << std::endl;
     } else {
         model_keypoints_ = keypoints;
+        std::cout << "Model Keypoints Size: " << model_keypoints_->size() << std::endl;
     }
 
     // Show_Keypoints(keypoints, cloud);
@@ -95,13 +93,13 @@ void LocalMatcher::PFHMatch(const PfhParameters& pfh_param)
         new pcl::PointCloud<pcl::PFHSignature125>());
 
     CalculatePfhDescri(scene_keypoints_, pfh_param.pfh_radius,
-        pfh_param.normal_radius, scene_descriptors);
+        scene_descriptors);
     CalculatePfhDescri(model_keypoints_, pfh_param.pfh_radius,
-        pfh_param.normal_radius, model_descriptors);
-
+        model_descriptors);
+    
     pcl::KdTreeFLANN<pcl::PFHSignature125> matching;
     matching.setInputCloud(model_descriptors);
-
+    
     pcl::CorrespondencesPtr correspondences(new pcl::Correspondences());
 
     for (size_t i = 0; i < scene_descriptors->size(); ++i) {
@@ -155,19 +153,20 @@ void LocalMatcher::PFHMatch(const PfhParameters& pfh_param)
 
 void LocalMatcher::CalculatePfhDescri(
     const PXYZS::Ptr cloud,
-    double pfh_radius, double normal_radius,
+    double pfh_radius,
     const pcl::PointCloud<pcl::PFHSignature125>::Ptr& descriptors)
 {
     pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
     pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>);
-
+    
     EstimateNormalsByK(cloud, normals, 10);
+    
     pcl::PFHEstimation<PXYZ, PN, pcl::PFHSignature125> pfh;
     pfh.setInputCloud(cloud);
     pfh.setInputNormals(normals);
     pfh.setSearchMethod(kdtree);
     pfh.setRadiusSearch(pfh_radius);
-
+    
     pfh.compute(*descriptors);
 }
 
@@ -178,9 +177,9 @@ void LocalMatcher::FPFHMatch(const FpfhParameters& fpfh_param)
     pcl::PointCloud<pcl::FPFHSignature33>::Ptr model_descriptors(
         new pcl::PointCloud<pcl::FPFHSignature33>());
     CalculateFpfhDescri(scene_keypoints_, fpfh_param.fpfh_radius,
-        fpfh_param.normal_radius, scene_descriptors);
+        scene_descriptors);
     CalculateFpfhDescri(model_keypoints_, fpfh_param.fpfh_radius,
-        fpfh_param.normal_radius, model_descriptors);
+        model_descriptors);
 
     pcl::KdTreeFLANN<pcl::FPFHSignature33> matching;
     matching.setInputCloud(model_descriptors);
@@ -240,13 +239,12 @@ void LocalMatcher::FPFHMatch(const FpfhParameters& fpfh_param)
 
 void LocalMatcher::CalculateFpfhDescri(
     const PXYZS::Ptr cloud,
-    double fpfh_radius, double normal_radius,
+    double fpfh_radius,
     const pcl::PointCloud<pcl::FPFHSignature33>::Ptr& descriptors)
 {
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
     pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
 
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
     EstimateNormalsByK(cloud, normals, 10);
     pcl::FPFHEstimation<PXYZ, PN, pcl::FPFHSignature33> fpfh;
     fpfh.setInputCloud(cloud);
@@ -264,9 +262,9 @@ void LocalMatcher::RSDMatch(const RsdParameters& rsd_parameters)
         new pcl::PointCloud<pcl::PrincipalRadiiRSD>());
 
     CalculateRsdDescri(scene_keypoints_, rsd_parameters.rsd_radius,
-        rsd_parameters.plane_radius, rsd_parameters.normal_radius, scene_descriptors);
+        rsd_parameters.plane_radius, scene_descriptors);
     CalculateRsdDescri(model_keypoints_, rsd_parameters.rsd_radius,
-        rsd_parameters.plane_radius, rsd_parameters.normal_radius, model_descriptors);
+        rsd_parameters.plane_radius, model_descriptors);
 
     pcl::KdTreeFLANN<pcl::PrincipalRadiiRSD> matching;
     matching.setInputCloud(model_descriptors);
@@ -322,7 +320,7 @@ void LocalMatcher::RSDMatch(const RsdParameters& rsd_parameters)
 
 void LocalMatcher::CalculateRsdDescri(
     const PXYZS::Ptr cloud,
-    double rsd_radius, double plane_radius, double normal_radius,
+    double rsd_radius, double plane_radius,
     const pcl::PointCloud<pcl::PrincipalRadiiRSD>::Ptr& descriptors)
 {
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
@@ -349,9 +347,9 @@ void LocalMatcher::DSC3Match(const Dsc3Parameters& dsc3_param)
         new pcl::PointCloud<pcl::ShapeContext1980>());
 
     CalculateDscDescri(scene_keypoints_, dsc3_param.dsc_radius, dsc3_param.minimal_radius,
-        dsc3_param.point_density_raidus, dsc3_param.normal_radius, scene_descriptors);
+        dsc3_param.point_density_raidus, scene_descriptors);
     CalculateDscDescri(model_keypoints_, dsc3_param.dsc_radius, dsc3_param.minimal_radius,
-        dsc3_param.point_density_raidus, dsc3_param.normal_radius, model_descriptors);
+        dsc3_param.point_density_raidus, model_descriptors);
 
     pcl::KdTreeFLANN<pcl::ShapeContext1980> matching;
     matching.setInputCloud(model_descriptors);
@@ -410,13 +408,12 @@ void LocalMatcher::DSC3Match(const Dsc3Parameters& dsc3_param)
 void LocalMatcher::CalculateDscDescri(
     const PXYZS::Ptr cloud,
     double dsc_radius, double minimal_radius,
-    double point_density_raidus, double normal_radius,
+    double point_density_raidus,
     const pcl::PointCloud<pcl::ShapeContext1980>::Ptr& descriptors)
 {
     pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
     pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
 
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
     EstimateNormalsByK(cloud, normals, 10);
     pcl::ShapeContext3DEstimation<PXYZ, PN, pcl::ShapeContext1980> sc3d;
     sc3d.setInputCloud(cloud);
@@ -522,9 +519,9 @@ void LocalMatcher::SHOTMatch(const ShotParameters& shot_param)
         new pcl::PointCloud<pcl::SHOT352>());
 
     CalculateShotDescri(scene_keypoints_, shot_param.shot_radius,
-        shot_param.normal_radius, scene_descriptors);
+        scene_descriptors);
     CalculateShotDescri(model_keypoints_, shot_param.shot_radius,
-        shot_param.normal_radius, model_descriptors);
+        model_descriptors);
 
     pcl::KdTreeFLANN<pcl::SHOT352> matching;
     matching.setInputCloud(model_descriptors);
@@ -582,14 +579,13 @@ void LocalMatcher::SHOTMatch(const ShotParameters& shot_param)
 
 void LocalMatcher::CalculateShotDescri(
     const PXYZS::Ptr cloud,
-    double shot_radius, double normal_radius,
+    double shot_radius,
     const pcl::PointCloud<pcl::SHOT352>::Ptr& descriptors)
 {
     pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<pcl::Normal>());
     pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
 
     EstimateNormalsByK(cloud, normals, 10);
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
 
     pcl::SHOTEstimation<PXYZ, PN, pcl::SHOT352> shot;
     shot.setInputCloud(cloud);
@@ -674,7 +670,6 @@ void LocalMatcher::CalculateSiDescri(
     pcl::PointCloud<PN>::Ptr normals(new pcl::PointCloud<PN>());
     pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>());
 
-    // EstimateNormals(cloud, kdtree, normals, normal_radius);
     EstimateNormalsByK(cloud, normals, 10);
 
     pcl::SpinImageEstimation<PXYZ, PN, pcl::Histogram<153>> si;
@@ -884,7 +879,6 @@ void LocalMatcher::EstimateNormalsByK(const PXYZS::Ptr cloud,
     norm_est.setKSearch(k);
     norm_est.setInputCloud(cloud);
     norm_est.compute(*normals);
-
     // visualize_normals(cloud, normals);
 }
 

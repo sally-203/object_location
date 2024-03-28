@@ -16,8 +16,7 @@ void GlobalMatcher::SetSceneCloud(const PXYZS::Ptr scene)
     return;
 }
 
-void GlobalMatcher::ClusterModelPointCloud(
-    const PXYZS::Ptr cloud,
+void GlobalMatcher::ClusterPointCloud(const bool flag, const PXYZS::Ptr cloud,
     const ClusterParameters& cluster_param)
 {
     pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>);
@@ -41,43 +40,22 @@ void GlobalMatcher::ClusterModelPointCloud(
         cluster->width = cluster->points.size();
         cluster->height = 1;
         cluster->is_dense = true;
-        model_clusters_.push_back(cluster);
-    }
-    std::cout << "model cluster size: " << model_clusters_.size() << std::endl;
-    if (cluster_param.show_flag) {
-        VisualizeClusters(model_clusters_);
-    }
-}
-
-void GlobalMatcher::ClusterScenePointCloud(const PXYZS::Ptr cloud,
-    const ClusterParameters& cluster_param)
-{
-    pcl::search::KdTree<PXYZ>::Ptr kdtree(new pcl::search::KdTree<PXYZ>);
-    kdtree->setInputCloud(cloud);
-
-    pcl::EuclideanClusterExtraction<PXYZ> ec;
-    ec.setClusterTolerance(cluster_param.cluster_tolerance);
-    ec.setMinClusterSize(cluster_param.min_cluster_size);
-    ec.setMaxClusterSize(cluster_param.max_cluster_size);
-    ec.setSearchMethod(kdtree);
-    ec.setInputCloud(cloud);
-
-    std::vector<pcl::PointIndices> cluster_indices;
-    ec.extract(cluster_indices);
-
-    for (const auto& indices : cluster_indices) {
-        PXYZS::Ptr cluster(new PXYZS);
-        for (const auto& index : indices.indices) {
-            cluster->points.push_back(cloud->points[index]);
+        if (flag) {
+            scene_clusters_.push_back(cluster);
+        } else {
+            model_clusters_.push_back(cluster);
         }
-        cluster->width = cluster->points.size();
-        cluster->height = 1;
-        cluster->is_dense = true;
-        scene_clusters_.push_back(cluster);
     }
-    std::cout << "scene cluster size: " << scene_clusters_.size() << std::endl;
-    if (cluster_param.show_flag) {
-        VisualizeClusters(scene_clusters_);
+    if (flag) {
+        std::cout << "scene cluster size: " << scene_clusters_.size() << std::endl;
+        if (cluster_param.show_flag) {
+            VisualizeClusters(scene_clusters_);
+        }
+    } else {
+        std::cout << "model cluster size: " << model_clusters_.size() << std::endl;
+        if (cluster_param.show_flag) {
+            VisualizeClusters(model_clusters_);
+        }
     }
 }
 
@@ -421,7 +399,8 @@ void GlobalMatcher::GFPFHMatch(const GfpfhParameters& gfpfh_params)
             point.x = cluster->points[j].x;
             point.y = cluster->points[j].y;
             point.z = cluster->points[j].z;
-            point.label = 1 + j % scene_clusters_.size();
+            // point.label = 1 + j % scene_clusters_.size();
+            point.label = 1 + i % model_clusters_.size();
             object->push_back(point);
         }
         pcl::PointCloud<pcl::GFPFHSignature16>::Ptr descriptors(new pcl::PointCloud<pcl::GFPFHSignature16>);
@@ -444,7 +423,8 @@ void GlobalMatcher::GFPFHMatch(const GfpfhParameters& gfpfh_params)
             point.x = cluster->points[j].x;
             point.y = cluster->points[j].y;
             point.z = cluster->points[j].z;
-            point.label = 1 + j % scene_clusters_.size();
+            // point.label = 1 + j % scene_clusters_.size();
+            point.label = 1 + i % scene_clusters_.size();
             object->push_back(point);
         }
         pcl::PointCloud<pcl::GFPFHSignature16>::Ptr descriptiors(new pcl::PointCloud<pcl::GFPFHSignature16>);

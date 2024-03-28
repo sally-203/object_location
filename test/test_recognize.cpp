@@ -19,8 +19,8 @@ int main()
     globalMatcher.SetModelCloud(model);
 
     ClusterParameters cluster_param;
-    globalMatcher.ClusterScenePointCloud(scene, cluster_param);
-    globalMatcher.ClusterModelPointCloud(model, cluster_param);
+    globalMatcher.ClusterPointCloud(true, scene, cluster_param);
+    globalMatcher.ClusterPointCloud(false, model, cluster_param);
 
     VfhParameters vfh_param;
     globalMatcher.VFHMatch(vfh_param);
