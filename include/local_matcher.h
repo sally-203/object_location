@@ -78,6 +78,10 @@ public:
 
     void ROPSMatch(const RopsParameters& rops_param);
 
+    void read_pose_txt(std::string& filename, std::vector<Eigen::Matrix4f>& poses);
+
+    void AbsolueAccuracyEstimate(Eigen::Matrix4f& true_pose);
+
     void AccuracyEstimate();
 
     void CorresGrouping(double gc_size = 0.01);

@@ -1,4 +1,7 @@
 #include "local_matcher.h"
+#include "Eigen/src/Core/Matrix.h"
+#include "Eigen/src/Geometry/Quaternion.h"
+#include <iostream>
 
 namespace matcher {
 
@@ -109,7 +112,7 @@ void LocalMatcher::PFHMatch(const PfhParameters& pfh_param)
         if (std::isfinite(scene_descriptors->at(i).histogram[0])) {
             int neighborCount = matching.nearestKSearch(scene_descriptors->at(i), 1,
                 neighbors, squaredDistances);
-            // std::cout << squaredDistances[0] << std::endl;
+            // std::cout << "squaredDistance[0]: " << squaredDistances[0] << std::endl;
             if (neighborCount == 1 && squaredDistances[0] < pfh_param.distance_thre) {
                 pcl::Correspondence correspondence(neighbors[0], static_cast<int>(i),
                     squaredDistances[0]);
@@ -135,7 +138,7 @@ void LocalMatcher::PFHMatch(const PfhParameters& pfh_param)
     pose.setCorrespondenceRandomness(pfh_param.common_params.randomness);
     pose.setInlierFraction(pfh_param.common_params.inlier_fraction);
     pose.setNumberOfSamples(pfh_param.common_params.num_samples);
-    pose.setSimilarityThreshold(pfh_param.common_params.similiar_thre);
+    pose.setSimilarityThreshold(pfh_param.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(pfh_param.common_params.corres_distance);
     pose.setMaximumIterations(pfh_param.common_params.nr_iterations);
 
@@ -220,7 +223,7 @@ void LocalMatcher::FPFHMatch(const FpfhParameters& fpfh_param)
     pose.setCorrespondenceRandomness(fpfh_param.common_params.randomness);
     pose.setInlierFraction(fpfh_param.common_params.inlier_fraction);
     pose.setNumberOfSamples(fpfh_param.common_params.num_samples);
-    pose.setSimilarityThreshold(fpfh_param.common_params.similiar_thre);
+    pose.setSimilarityThreshold(fpfh_param.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(fpfh_param.common_params.corres_distance);
     pose.setMaximumIterations(fpfh_param.common_params.nr_iterations);
 
@@ -302,7 +305,7 @@ void LocalMatcher::RSDMatch(const RsdParameters& rsd_parameters)
     pose.setCorrespondenceRandomness(rsd_parameters.common_params.randomness);
     pose.setInlierFraction(rsd_parameters.common_params.inlier_fraction);
     pose.setNumberOfSamples(rsd_parameters.common_params.num_samples);
-    pose.setSimilarityThreshold(rsd_parameters.common_params.similiar_thre);
+    pose.setSimilarityThreshold(rsd_parameters.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(rsd_parameters.common_params.corres_distance);
     pose.setMaximumIterations(rsd_parameters.common_params.nr_iterations);
 
@@ -347,9 +350,9 @@ void LocalMatcher::DSC3Match(const Dsc3Parameters& dsc3_param)
         new pcl::PointCloud<pcl::ShapeContext1980>());
 
     CalculateDscDescri(scene_keypoints_, dsc3_param.dsc_radius, dsc3_param.minimal_radius,
-        dsc3_param.point_density_raidus, scene_descriptors);
+        dsc3_param.point_density_radius, scene_descriptors);
     CalculateDscDescri(model_keypoints_, dsc3_param.dsc_radius, dsc3_param.minimal_radius,
-        dsc3_param.point_density_raidus, model_descriptors);
+        dsc3_param.point_density_radius, model_descriptors);
 
     pcl::KdTreeFLANN<pcl::ShapeContext1980> matching;
     matching.setInputCloud(model_descriptors);
@@ -389,7 +392,7 @@ void LocalMatcher::DSC3Match(const Dsc3Parameters& dsc3_param)
     pose.setCorrespondenceRandomness(dsc3_param.common_params.randomness);
     pose.setInlierFraction(dsc3_param.common_params.inlier_fraction);
     pose.setNumberOfSamples(dsc3_param.common_params.num_samples);
-    pose.setSimilarityThreshold(dsc3_param.common_params.similiar_thre);
+    pose.setSimilarityThreshold(dsc3_param.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(dsc3_param.common_params.corres_distance);
     pose.setMaximumIterations(dsc3_param.common_params.nr_iterations);
 
@@ -434,9 +437,9 @@ void LocalMatcher::USCMatch(const UscParameters& usc_param)
         new pcl::PointCloud<pcl::UniqueShapeContext1960>());
 
     CalculateUscDescri(scene_keypoints_, usc_param.usc_radius, usc_param.minimal_radius,
-        usc_param.point_density_raidus, usc_param.local_radius, scene_descriptors);
+        usc_param.point_density_radius, usc_param.local_radius, scene_descriptors);
     CalculateUscDescri(model_keypoints_, usc_param.usc_radius, usc_param.minimal_radius,
-        usc_param.point_density_raidus, usc_param.local_radius, model_descriptors);
+        usc_param.point_density_radius, usc_param.local_radius, model_descriptors);
 
     pcl::KdTreeFLANN<pcl::UniqueShapeContext1960> matching;
     matching.setInputCloud(model_descriptors);
@@ -477,7 +480,7 @@ void LocalMatcher::USCMatch(const UscParameters& usc_param)
     pose.setCorrespondenceRandomness(usc_param.common_params.randomness);
     pose.setInlierFraction(usc_param.common_params.inlier_fraction);
     pose.setNumberOfSamples(usc_param.common_params.num_samples);
-    pose.setSimilarityThreshold(usc_param.common_params.similiar_thre);
+    pose.setSimilarityThreshold(usc_param.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(usc_param.common_params.corres_distance);
     pose.setMaximumIterations(usc_param.common_params.nr_iterations);
 
@@ -561,7 +564,7 @@ void LocalMatcher::SHOTMatch(const ShotParameters& shot_param)
     pose.setCorrespondenceRandomness(shot_param.common_params.randomness);
     pose.setInlierFraction(shot_param.common_params.inlier_fraction);
     pose.setNumberOfSamples(shot_param.common_params.num_samples);
-    pose.setSimilarityThreshold(shot_param.common_params.similiar_thre);
+    pose.setSimilarityThreshold(shot_param.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(shot_param.common_params.corres_distance);
     pose.setMaximumIterations(shot_param.common_params.nr_iterations);
 
@@ -645,7 +648,7 @@ void LocalMatcher::SIMatch(const SpinParameters& spin_param)
     pose.setCorrespondenceRandomness(spin_param.common_params.randomness);
     pose.setInlierFraction(spin_param.common_params.inlier_fraction);
     pose.setNumberOfSamples(spin_param.common_params.num_samples);
-    pose.setSimilarityThreshold(spin_param.common_params.similiar_thre);
+    pose.setSimilarityThreshold(spin_param.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(spin_param.common_params.corres_distance);
     pose.setMaximumIterations(spin_param.common_params.nr_iterations);
 
@@ -733,7 +736,7 @@ void LocalMatcher::ROPSMatch(const RopsParameters& rops_param)
     pose.setCorrespondenceRandomness(rops_param.common_params.randomness);
     pose.setInlierFraction(rops_param.common_params.inlier_fraction);
     pose.setNumberOfSamples(rops_param.common_params.num_samples);
-    pose.setSimilarityThreshold(rops_param.common_params.similiar_thre);
+    pose.setSimilarityThreshold(rops_param.common_params.similar_thre);
     pose.setMaxCorrespondenceDistance(rops_param.common_params.corres_distance);
     pose.setMaximumIterations(rops_param.common_params.nr_iterations);
 
@@ -816,6 +819,57 @@ void LocalMatcher::AccuracyEstimate()
     distance_ = std::sqrt(distance_ / aligned_model->size());
     std::cout << "RMSE: " << distance_ << std::endl;
 }
+
+void LocalMatcher::AbsolueAccuracyEstimate(Eigen::Matrix4f& true_pose){
+    Eigen::Vector3f trans1 = transformations_.block<3, 1>(0, 3);
+    Eigen::Vector3f trans2 = true_pose.block<3, 1>(0, 3);
+
+    Eigen::Matrix3f rota1 = transformations_.block<3, 3>(0, 0);
+    Eigen::Matrix3f rota2 = true_pose.block<3, 3>(0, 0);
+
+    std::cout << "translation error: " << (trans1 - trans2).array().abs().transpose() << std::endl;
+
+    Eigen::Vector3f euler1(rota1.eulerAngles(0, 1, 2));
+    Eigen::Vector3f euler2(rota2.eulerAngles(0, 1, 2));
+    Eigen::Vector3f angles = (euler1 - euler2).cwiseAbs();
+
+    // 修正到 [-pi, pi] 区间
+    for (int i = 0; i < 3; ++i) {
+        if (angles[i] > M_PI) {
+            angles[i] -= 2 * M_PI;
+        }
+    }
+    std::cout << euler1 << "\n";
+    std::cout << euler2 << "\n";
+    std::cout << "rotation error (euler) : " << angles.transpose() << std::endl;
+}
+
+void LocalMatcher::read_pose_txt(std::string& filename, std::vector<Eigen::Matrix4f>& poses){
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Unable to open file " << filename << std::endl;
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        Eigen::Matrix4f pose;
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                float value;
+                // if (!(iss >> value)) {
+                //     std::cerr << "Error: Invalid line format in file " << filename << std::endl;
+                //     return;
+                // }
+                pose(i, j) = value;
+            }
+        }
+        poses.push_back(pose);
+    }
+
+    file.close();
+  }
 
 void LocalMatcher::CorresGrouping(double gc_size)
 {

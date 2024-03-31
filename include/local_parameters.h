@@ -1,12 +1,11 @@
 #ifndef LOCAL_PARAMETERS_H
 #define LOCAL_PARAMETERS_H
-
 struct CommonParameters {
     bool show_flag = true;
     int randomness = 3;
     double inlier_fraction = 0.01;
     int num_samples = 3;
-    double similiar_thre = 0.4;
+    double similar_thre = 0.4;
     double corres_distance = 1.0;
     int nr_iterations = 20000;
 };
@@ -45,7 +44,7 @@ struct RsdParameters {
 struct Dsc3Parameters {
     double dsc_radius = 0.02;
     double minimal_radius = 0.01;
-    double point_density_raidus = 0.03;
+    double point_density_radius = 0.03;
     double normal_radius = 0.015;
     double distance_thre = 12000;
     CommonParameters common_params;
@@ -54,7 +53,7 @@ struct Dsc3Parameters {
 struct UscParameters {
     double usc_radius = 0.02;
     double minimal_radius = 0.01;
-    double point_density_raidus = 0.055;
+    double point_density_radius = 0.055;
     double local_radius = 0.02;
     double distance_thre = 5000;
     CommonParameters common_params;

@@ -33,6 +33,6 @@ add_library(globalMatcher SHARED src/global_matcher.cpp)
 
 add_executable(test_match test/test_match.cpp)
 add_executable(test_recognize test/test_recognize.cpp)
-target_link_libraries(test_match localMatcher ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
-target_link_libraries(test_recognize globalMatcher ${PCL_LIBRARIES} ${OpenCV_LIBRARIES})
+target_link_libraries(test_match localMatcher ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} config++)
+target_link_libraries(test_recognize globalMatcher ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} config++)
 

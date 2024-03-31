@@ -1,7 +1,20 @@
 #include "global_matcher.h"
+#include "read_config.h"
 
 int main()
 {
+    ivgs_util::GlobalConfig globalconfig("../config/global_param.cfg");
+
+    ClusterParameters clusterparam = globalconfig.ReadClusterParam();
+    VfhParameters vfhparam = globalconfig.ReadVfhParam();
+    CvfhParameters cvfhparam = globalconfig.ReadCvfhParam();
+    OurcvfhParameters ourcvfhparam = globalconfig.ReadOurcvfhParam();
+    EsfParameters esfparam = globalconfig.ReadEsfParam();
+    GfpfhParameters gfpfhparam = globalconfig.ReadGfpfhParam();
+    GrsdParameters grsdparam = globalconfig.ReadGrsdParam();
+    
+    return 0;
+    
     PXYZS::Ptr scene(new PXYZS);
     PXYZS::Ptr model(new PXYZS);
     // m
