@@ -40,5 +40,12 @@ build/
 # cache dir
 .cache/
 
-# # specific file
-# pcl_descriptors.md
+# data dir
+data/
+
+# image dir
+images/
+papers/
+
+# specific file
+pcl_descriptors.md

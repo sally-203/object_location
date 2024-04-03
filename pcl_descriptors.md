@@ -957,39 +957,24 @@ void GlobalMatcher::VFHMatch(const VfhParameters& vfh_params)
 ### 4.1 数据集和实验平台
 
 - 数据集：
+  点云匹配数据主要由工艺零件和Standford数据集组成。工艺零件数据集是mechmind相机真实拍摄的数据通过去除桌面得到的; Standford数据集包含真实变换位姿数据，生成方式是对Bunny/Duck/Hand等模型点云在各个方向进行投影变换，得到的变换数据。点云size如下表所示：
 
-  -- 1. OUR DATASET:
+<center>
 
- MODEL (Point Size~10000):
-<figure>
-  <div style="text-align:center;">
-    <img src="./images/16.png" alt="ESF描述符" style="width:600px;height:250px;"/>
-  </div>
-  <figcaption><center>图16. L-shaped零件</center></figcaption>
-</figure>
+#### 表1. 不同数据集的点云数量
 
-<figure>
-  <div style="text-align:center;">
-    <img src="./images/17.png" alt="ESF描述符" style="width:600px;height:250px;"/>
-  </div>
-  <figcaption><center>图17. S-shaped零件</center></figcaption>
-</figure>
+| Datasets |point size of scene|point size of model|
+|--------|-------- |--------|
+| 工艺零件 | 848    | 10000  |
+| Bunny  | 3539    | 817    |
+| Duck   | 5671    | 745    |  
+| Hand   | 2499    | 1633   |
 
-SCENE (Point Size~905):
-<figure>
-  <div style="text-align:center;">
-    <img src="./images/18.png" alt="ESF描述符" style="width:600px;height:250px;"/>
-  </div>
-  <figcaption><center>图18. 待匹配识别点云</center></figcaption>
-</figure>
-
-  -- 2.
-
-  -- 3.
+</center>
 
 - 实验平台：
 
-  -- 操作系统： 基于ubuntu 18.04系统
+  -- 操作系统： 基于ubuntu 20.04系统
 
   -- CPU： 第11代英特尔酷睿i9-11950H，基本时钟频率为2.6GHz, 8核, 16线程
 
@@ -998,60 +983,274 @@ SCENE (Point Size~905):
   -- GPU： NVIDIA T1200
 
 ### 4.2 基于局部描述符的点云匹配
+  
+  下面计算基于局部描述符的不同数据集的点云匹配时间和匹配效果。
 
-#### 4.2.1 速度
+#### 4.2.1 匹配时间
 
-数据集：
-以计算时间为测量单位（毫秒）
-| Descriptors / Datasets |    1    |    2   |
-|--------                |-------- |--------|
-| PFH                    | 1061    | 16100       |
-| FPFH                   | 1061    |        |
-| RSD                    | 971     |        |
-| 3DSC                   | 780     |
-| USC                    | 1011    |
-| SHOT                   | 712     |
-| Spin Image             | 660     |
-| RoPS                   | 1044    |
+分别计算不同匹配方法在不同数据集上的匹配时间，测量单位为毫秒。
+
+- 数据集1：零件数据集
+- 数据集2：Bunny
+- 数据集3：Duck
+- 数据集4：Hand
+
+<center>
+
+#### 表2. 不同描述符在不同数据集的匹配时间
+
+| Descriptors / Datasets |    1    |    2   |   3    |   4   |
+|--------                |-------- |--------|--------|-------|
+| PFH                    | 1061    | 15587  |  27858 |  3953 |
+| FPFH                   | 1061    | 4061   |  7228  |  9752 |
+| RSD                    | 971     | 17268  |  5837  |  5364 |
+| 3DSC                   | 780     | 8204   |  10850 |  30842|
+| USC                    | 1011    | 24404  |  35527 |  43352|
+| SHOT                   | 712     | 10504  |  6817  |  58375|
+| Spin Image             | 660     | 5728   |  1237  |  49032|
+| RoPS                   | 1044    | 2164   |  5197  |  12478|
+
+</center>
 
 #### 4.2.2 精度
 
-AccuracyEstimate()
+不同数据的匹配效果如下图所示（这是经过调参之后的匹配效果）：
 
-| Descriptors / Datasets |    1   |    2   |
-|--------                |--------|--------|
-| PFH                    | 0.013  | 0.091       |
-| FPFH                   | 0.014  |        |
-| RSD                    | 0.014  
-| 3DSC                   | 0.013
-| USC                    | 0.014
-| SHOT                   | 0.013
-| Spin Image             | 0.013
-| RoPS                   | 0.013
+<figure>
+  <div style="text-align:center;">
+    <img src="./images/16.png" alt="匹配效果" style="width:1600px;height:500px;"/>
+  </div>
+  <figcaption><center> 图16. 不同方法在不同数据的匹配效果 </center></figcaption>
+</figure>
 
-add: “未知变换”的实验评价
+评定精度方法有2种。第1种是对匹配后的点云alignedModel与场景点云sceneModel计算RMSE，方法参考AccuracyEstimate()。
+
+<center>
+
+#### 表3. 不同描述符在不同数据集匹配的RMSE
+
+| Descriptors / Datasets |    1   |    2   |   3   |   4   |
+|--------                |--------|--------|-------|-------|
+| PFH                    | 0.013  | 0.091  | 0.122 | 0.038 |
+| FPFH                   | 0.014  | 0.126  | 0.105 | 0.049 |
+| RSD                    | 0.014  | 0.104  | 0.125 | 0.040 |
+| 3DSC                   | 0.013  | 0.093  | 0.143 | 0.050 |
+| USC                    | 0.014  | 0.108  | 0.122 | 0.044 |
+| SHOT                   | 0.013  | 0.099  | 0.128 | 0.058 |
+| Spin Image             | 0.013  | 0.103  | 0.147 | 0.051 |
+| RoPS                   | 0.013  | 0.118  | 0.162 | 0.045 |
+
+</center>
+
+第2种是与已有的真值位姿比较，计算匹配后的位姿与真值的平移误差(m)和旋转误差(degree)，方法参考AbsolueAccuracyEstimate(Eigen::Matrix4f& true_pose)。
+
+- x方向平移误差：
+
+<center>
+
+#### 表4. 不同描述符在不同数据集x方向的平移误差
+
+| Descriptors / Datasets |    2   |    3   |    4   |
+|--------                |--------|--------|--------|
+| PFH                    | 0.666  | 0.014  |  0.002 |
+| FPFH                   | 0.016  | 0.033  |  0.499 |
+| RSD                    | 0.649  | 0.337  |  0.124 |
+| 3DSC                   | 0.226  | 0.045  |  0.060 |
+| USC                    | 0.067  | 0.019  |  0.108 |
+| SHOT                   | 0.101  | 0.704  |  0.102 |
+| Spin Image             | 0.530  | 0.169  |  0.168 |
+| RoPS                   | 0.060  | 0.002  |  0.093 |
+
+</center>
+
+- y方向平移误差：
+
+<center>
+
+#### 表5. 不同描述符在不同数据集y方向的平移误差
+
+| Descriptors / Datasets |    2   |    3   |    4   |
+|--------                |--------|--------|--------|
+| PFH                    | 0.887  | 0.039  |  0.025 |
+| FPFH                   | 0.289  | 0.319  |  0.918 |
+| RSD                    | 0.947  | 0.081  |  0.072 |
+| 3DSC                   | 0.035  | 1.186  |  0.127 |
+| USC                    | 0.166  | 0.009  |  0.026 |
+| SHOT                   | 0.274  | 0.952  |  0.043 |
+| Spin Image             | 0.911  | 0.145  |  0.089 |
+| RoPS                   | 0.194  | 0.010  |  0.106 |
+
+</center>
+
+- z方向平移误差：
+
+<center>
+
+#### 表6. 不同描述符在不同数据集z方向的平移误差
+
+| Descriptors / Datasets |    2   |    3   |    4   |
+|--------                |--------|--------|--------|
+| PFH                    | 0.911  | 0.076  |  0.039 |
+| FPFH                   | 0.439  | 0.116  |  1.084 |
+| RSD                    | 0.856  | 0.476  |  0.012 |
+| 3DSC                   | 0.314  | 1.292  |  0.129 |
+| USC                    | 0.274  | 0.059  |  0.045 |
+| SHOT                   | 0.481  | 0.257  |  0.180 |
+| Spin Image             | 1.096  | 0.092  |  0.137 |
+| RoPS                   | 0.386  | 0.107  |  0.142 |
+
+</center>
+
+- roll 旋转误差：
+
+<center>
+
+#### 表7. 不同描述符在不同数据集roll的旋转误差
+
+| Descriptors / Datasets |    2   |   3    |    4   |
+|--------                |--------|--------|--------|
+| PFH                    | -9.476 | -7.845 | -6.535 |
+| FPFH                   | -15.759| 41.659 | 1.180  |
+| RSD                    | -9.426 | 61.375 | -2.39  |
+| 3DSC                   | -2.598 | -12.51 | -7.379 |
+| USC                    | -15.628| 4.119  | 0.941  |
+| SHOT                   | -15.025| -8.422 | -3.505 |
+| Spin Image             | -13.303| -1.718 | -3.512 |
+| RoPS                   | -9.636 | -8.223 | -2.9   |
+
+</center>
+
+- pitch 旋转误差：
+
+<center>
+
+#### 表8. 不同描述符在不同数据集pitch的旋转误差
+
+| Descriptors / Datasets |    2   |   3    |    4   |
+|--------                |--------|--------|--------|
+| PFH                    | -52.622| -66.492| -67.586|
+| FPFH                   | -42.251| 26.163 | -15.728|
+| RSD                    | -58.121| -17.174| -60.225|
+| 3DSC                   | -34.105| 4.550  | -66.059|
+| USC                    | -64.506| 7.493  | 7.302  |
+| SHOT                   | -31.512| -41.799| -45.586|
+| Spin Image             | -38.823| -55.561| -67.253|
+| RoPS                   | -38.322| -68.185| -51.058|
+
+</center>
+
+- yaw 旋转误差：
+
+<center>
+
+#### 表9. 不同描述符在不同数据集yaw的旋转误差
+
+| Descriptors / Datasets |    2   |   3    |    4   |
+|--------                |--------|--------|--------|
+| PFH                    | 24.7882| 8.39   | 6.459  |
+| FPFH                   | -17.603| 30.110 | 5.166  |
+| RSD                    | 16.609 | 83.352 | 7.613  |
+| 3DSC                   | -5.39  | 7.849  | -2.212 |
+| USC                    | -4.666 | 5.090  | 3.564  |
+| SHOT                   | -19.502| 9.000  | -10.936|
+| Spin Image             | 25.140 | 14.671 | -13.962|
+| RoPS                   | -18.824| 5.308  | -5.366 |
+
+</center>
 
 ### 4.3 基于全局描述符的点云识别
+  
+  计算基于全局描述符的不同数据集的点云识别时间和识别效果。
 
 #### 4.3.1 速度
 
-#### 4.3.2 精度
+  分别计算不同识别方法在不同数据集上的识别时间，测量单位为毫秒。
+
+<center>
+
+#### 表10. 不同描述符在不同数据集的识别时间
+
+| Descriptors / Datasets |    1   |   2    |    3   |
+|--------                |--------|--------|--------|
+| VFH                    | 3      | 4      |  8     |
+| CVFH                   | 16     | 12     | 26     |
+| OUR_CVFH               | 16     | 12     | 26     |
+| ESF                    | 40     | 46     | 70     |
+| GFPFH                  | 7      | 2471   | 7732   |
+| GRSD                   | 2      | 6      | 13     |
+
+</center>
+
+#### 4.3.2 准确率
+
+不同数据的识别效果如下图所示。主要修改cluster_tolerance调整分类，其余全部用默认参数实现。
+
+<figure>
+  <div style="text-align:center;">
+    <img src="./images/17.png" alt="识别效果-数据集1" style="width:1600px;height:250px;"/>
+  </div>
+  <figcaption><center> 图17. 不同方法在数据集1的识别效果 </center></figcaption>
+</figure>
+
+<figure>
+  <div style="text-align:center;">
+    <img src="./images/18.png" alt="识别效果-数据集2" style="width:1600px;height:250px;"/>
+  </div>
+  <figcaption><center> 图18. 不同方法在数据集2的识别效果 </center></figcaption>
+</figure>
+
+<figure>
+  <div style="text-align:center;">
+    <img src="./images/19.png" alt="识别效果-数据集3" style="width:1600px;height:250px;"/>
+  </div>
+  <figcaption><center> 图19. 不同方法在数据集3的识别效果 </center></figcaption>
+</figure>
 
 ## 五. 问题与改进
 
-estimateNormalsByK && EstimateNormals 区别
+- 实验测试过程中，发现估计法向量有2种方法，既可以通过K个点估计法向量(LocalMatcher::estimateNormalsByK),也可以通过邻域估计法向量(LocalMatcher::EstimateNormals)。但是实验证明，前者比后者效果更好，可视化法向量比较效果也观察不到区别。
+
+```C++
+void LocalMatcher::EstimateNormals(const PXYZS::Ptr cloud,
+                                   pcl::search::KdTree<PXYZ>::Ptr kdtree,
+                                   const PNS::Ptr normals, double radius) {
+  pcl::NormalEstimation<PXYZ, PN> normalEstimation;
+  normalEstimation.setInputCloud(cloud);
+  normalEstimation.setRadiusSearch(radius);
+  pcl::search::KdTree<PXYZ>::Ptr KdTree(new pcl::search::KdTree<PXYZ>);
+  normalEstimation.setSearchMethod(KdTree);
+  normalEstimation.compute(*normals);
+  // visualize_normals(cloud, normals);
+}
+
+void LocalMatcher::EstimateNormalsByK(const PXYZS::Ptr cloud,
+                                      const PNS::Ptr normals, int k) {
+  pcl::NormalEstimationOMP<PXYZ, pcl::Normal> norm_est;
+  norm_est.setNumberOfThreads(4);
+  norm_est.setKSearch(k);
+  norm_est.setInputCloud(cloud);
+  norm_est.compute(*normals);
+  // visualize_normals(cloud, normals);
+}
+```
+
+- 针对不同的数据集和不同方法，默认参数往往不能得到最佳的效果。所以往往需要调整参数，折中平衡速度与精度。另外，目前数据集使用的点云单位为米(m)，如果有需要测试的其他数据，需要先将单位转化为米(m)。
+
+- 匹配和识别速度与描述符数量有关。显而易见，识别只需要n个描述符（n=类别）,其识别速度大大快于匹配速度。
 
 ## 六. 总结
 
-该项目优势：
+针对目前常用的点云描述符，本项目分析各个描述符构建原理，基于PCL库实现点云匹配和识别功能。与其他公开资料比较，该项目存在以下优势：
 
-- 本文提供对应的参数分析，指导算法调参/提供每个方法的论文资料/参数文件global_parameters.h and local_parameters.h 方便调参匹配，拿来即用 / 比较各类匹配算法和识别算法的速度和精度
+- 提供对应描述符的原理分析以及参数分析，指导算法调参;
+- 本文的方法拿来即用，提供读取config参数文件功能，无需多次编译，方便调参匹配和识别;
+- 比较各类匹配算法和识别算法的速度和精度;
 
-- 算法适用性
-- 数据集: 更换传感器(realsense), object(size大一点), 噪声, 官方匹配数据集
-- 无法判断错误识别
-- 提供config读取，无需编译
-- 提供数据集
+但是，该项目仍然有很多需要改进的地方：
+
+- 实验数据集较小，未来可以增加数据。进一步测试不同传感器, 不同size, 不同噪声的数据集;
+- 基于描述符的点云识别无法判断错误识别，未来可以增加correspondence阈值剔除错误识别;
+- 读取config的实现目前不是最简洁的，后续可以继续改进;
 
 ## 七. 参考
 
