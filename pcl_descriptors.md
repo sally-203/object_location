@@ -1201,7 +1201,7 @@ void GlobalMatcher::VFHMatch(const VfhParameters& vfh_params)
 
 <figure>
   <div style="text-align:center;">
-    <img src="./images/19.png" alt="识别效果-数据集3" style="width:1600px;height:250px;"/>
+    <img src="./images/19.png" alt="识别效果-数据集3" style="width:1600px;height:400px;"/>
   </div>
   <figcaption><center> 图19. 不同方法在数据集3的识别效果 </center></figcaption>
 </figure>
@@ -1236,7 +1236,7 @@ void LocalMatcher::EstimateNormalsByK(const PXYZS::Ptr cloud,
 
 - 针对不同的数据集和不同方法，默认参数往往不能得到最佳的效果。所以往往需要调整参数，折中平衡速度与精度。另外，目前数据集使用的点云单位为米(m)，如果有需要测试的其他数据，需要先将单位转化为米(m)。
 
-- 匹配和识别速度与描述符数量有关。显而易见，识别只需要n个描述符（n=类别）,其识别速度大大快于匹配速度。
+- 匹配和识别速度与描述符数量有关。显而易见，识别只需要n个描述符（n=类别），其识别速度大大快于匹配速度。
 
 ## 六. 总结
 

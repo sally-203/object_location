@@ -1,15 +1,19 @@
 #include "global_matcher.h"
 #include "read_config.h"
 
-int main()
+int main(int argc, char** argv)
 {
     ivgs_util::GlobalConfig globalconfig("../config/global_param.cfg");
         
     PXYZS::Ptr scene(new PXYZS);
     PXYZS::Ptr model(new PXYZS);
 
-    pcl::io::loadPLYFile("../data/3.1.ply", *scene);
-    pcl::io::loadPLYFile("../data/3.2.ply", *model);
+    std::string path1 = argv[1];
+    std::string path2 = argv[2];
+    std::cout << path1 << "\n" << path2 << std::endl;
+
+    pcl::io::loadPLYFile(path1, *scene);
+    pcl::io::loadPLYFile(path2, *model);
 
     std::cout << "Point Size of Scene: " << scene->points.size() << std::endl;
     std::cout << "Point Size of Model: " << model->points.size() << std::endl;
